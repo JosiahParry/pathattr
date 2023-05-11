@@ -65,35 +65,89 @@ Conversion rates and lead value are derived from these (I think).
 path_data <- path10k[1:1000,]
 
 bm <- bench::mark(
-  original = data.table::rbindlist(
-    purrr::pmap(
-      list(path_str=path_data$path,date_str=path_data$dates,
-           outcome=path_data$leads,value=path_data$value),
-      attribute_path,
-      removal_effects_table,
-      .progress = 'path_level'
-    )
-  ),
-  mine = data.table::rbindlist(
-    purrr::pmap(
-      list(path_str=path_data$path,date_str=path_data$dates,
-           outcome=path_data$leads,value=path_data$value),
-      attr_path2,
-      lu,
-      .progress = 'path2_level'
-    )
-  ),
+  # original = data.table::rbindlist(
+  #   purrr::pmap(
+  #     list(path_str=path_data$path,date_str=path_data$dates,
+  #          outcome=path_data$leads,value=path_data$value),
+  #     attribute_path,
+  #     removal_effects_table,
+  #     .progress = 'path_level'
+  #   )
+  # ),
+  # mine = data.table::rbindlist(
+  #   purrr::pmap(
+  #     list(path_str=path_data$path,date_str=path_data$dates,
+  #          outcome=path_data$leads,value=path_data$value),
+  #     attr_path2,
+  #     lu,
+  #     .progress = 'path2_level'
+  #   )
+  # ),
   rust = data.table::rbindlist(attr_path(
     path_data$path,
     path_data$dates,
     path_data$leads,
     path_data$value,
     as.list(lu)
-  ))
+  )),
+  data.table = {
+    touches <- strsplit(path_data$path, ">", fixed = TRUE)
+    lt <- lengths(touches)
+    groups <- rep.int(seq_along(touches), lt)
+    outcome <- rep.int(path_data$leads, lt)
+    value <- rep.int(path_data$value, lt) 
+    touches <- unlist(touches)
+    dates <- unlist(strsplit(path_data$dates, ">", fixed = TRUE))
+    not_empty <- touches != ''
+    dates <- dates[not_empty] 
+    touches <- touches[not_empty]
+    re <- lu[touches]
+    DT <- data.table(
+        channel_name = touches,
+        outcome = outcome,
+        date = dates,
+        re,
+        value,
+        groups
+    )
+    DT[, re_tot := sum(re, na.rm = TRUE), by = groups]
+    DT[, `:=`(conversion = outcome * re / re_tot, value = value * re / re_tot)]
+    DT[,.(channel_name, re, conversion, value, date)]
+  },
+  dplyr = {
+    touches <- strsplit(path_data$path, ">", fixed = TRUE)
+    lt <- lengths(touches)
+    groups <- rep.int(seq_along(touches), lt)
+    outcome <- rep.int(path_data$leads, lt)
+    value <- rep.int(path_data$value, lt) 
+    touches <- unlist(touches)
+    dates <- unlist(strsplit(path_data$dates, ">", fixed = TRUE))
+    not_empty <- touches != ''
+    dates <- dates[not_empty] 
+    touches <- touches[not_empty]
+    re <- lu[touches]
+    df <- data.frame(
+        channel_name = touches,
+        outcome = outcome,
+        date = dates,
+        re,
+        value,
+        groups
+     )
+    df |> 
+      mutate(
+        re_tot = sum(re, na.rm = TRUE),
+        conversion = outcome * re / re_tot,
+        value = value * re / re_tot,
+        .by = "groups"
+      ) |> 
+      select(channel_name, re, conversion, value, date) |> 
+      as.data.table()
+  }
 )
 
 
-bm |> 
+bmbm |> 
     dplyr::select(1:5) |> 
     dplyr::mutate(
         times_faster = dplyr::coalesce(
@@ -122,3 +176,37 @@ end <- Sys.time()
 end - start
 ```
 
+Using data.table and base R. 
+
+```{r}
+path_data <- dplyr::sample_n(path10k, 3000000, replace = TRUE)
+
+start <- Sys.time()
+ touches <- strsplit(path_data$path, ">", fixed = TRUE)
+    lt <- lengths(touches)
+    groups <- rep.int(seq_along(touches), lt)
+    outcome <- rep.int(path_data$leads, lt)
+    value <- rep.int(path_data$value, lt) 
+    touches <- unlist(touches)
+    dates <- unlist(strsplit(path_data$dates, ">", fixed = TRUE))
+    not_empty <- touches != ''
+    dates <- dates[not_empty] 
+    touches <- touches[not_empty]
+    re <- lu[touches]
+    DT <- data.table(
+        channel_name = touches,
+        outcome = outcome,
+        date = dates,
+        re,
+        value,
+        groups
+    )
+    DT[, re_tot := sum(re, na.rm = TRUE), by = groups]
+    DT[, `:=`(conversion = outcome * re / re_tot, value = value * re / re_tot)]
+    DT[,.(channel_name, re, conversion, value, date)]
+    
+end <- Sys.time()
+end - start
+```
+
+Why is this so damn fast? Well, it is because R is super fast. This code leverages R's strengths. Namely, vectorization. In the original R approach and the one that I wrote we fell into the 3rd circle of hell according to Patrick Burns. We failed to vectorize. 

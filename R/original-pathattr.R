@@ -40,8 +40,8 @@ attribute_path<-function(path_str,date_str,outcome,value,retbl){
       retbl |> dplyr::select(channel_name,removal_effects_conversion),
       'channel_name'
     ) |> dplyr::rename(
-      re=removal_effects_conversion
-    ) |> #distinct(channel_name,.keep_all=T) |>
+      re = removal_effects_conversion
+    ) |>
     dplyr::mutate(
       conversion=outcome*re/sum(re,na.rm=T),
       value=value*re/sum(re,na.rm=T),

@@ -1,0 +1,5 @@
+^pathattr\.Rproj$
+^\.Rproj\.user$
+^src/\.cargo$
+^data-raw$
+^README\.Rmd$
